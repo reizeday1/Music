@@ -85,6 +85,8 @@ class YTDLSource(discord.PCMVolumeTransformer):
 		'no_warnings': True,
 		'default_search': 'auto',
 		'source_address': '0.0.0.0',
+		'force-ipv4' : True,
+    		'-4': True
 	}
 
 	FFMPEG_OPTIONS = {
@@ -252,17 +254,20 @@ class VoiceState:
 		while True:
 			self.next.clear()
 
-			if not self.loop:
-				# Try to get the next song within 3 minutes.
-				# If no song will be added to the queue in time,
-				# the player will disconnect due to performance
-				# reasons.
-				try:
-					async with timeout(180):  # 3 minutes
-						self.current = await self.songs.get()
-				except asyncio.TimeoutError:
-					self.bot.loop.create_task(self.stop())
-					return
+			if self.loop and self.current is not None:
+				source1 = await YTDLSource.create_source(self._ctx, self.current.source.url, loop=self.bot.loop)
+				song1 = Song(source1)
+				await self.songs.put(song1)
+			else:
+				pass
+
+			try:
+				async with timeout(180):  # 3 minutes
+					self.current = await self.songs.get()
+			except asyncio.TimeoutError:
+				self.bot.loop.create_task(self.stop())
+				return
+
 
 			self.current.source.volume = self._volume
 			self.voice.play(self.current.source, after=self.play_next_song)
@@ -319,18 +324,12 @@ class Music(commands.Cog):
 
 	async def cog_command_error(self, ctx: commands.Context, error: commands.CommandError):
 		await ctx.send('에러 : {}'.format(str(error)))
-	'''
-	@commands.command(name='join', invoke_without_subcommand=True)
-	async def _join(self, ctx: commands.Context):
-		destination = ctx.author.voice.channel
-		if ctx.voice_state.voice:
-			await ctx.voice_state.voice.move_to(destination)
-			return
 
-		ctx.voice_state.voice = await destination.connect()
-	'''
 	async def cleanup(self, ctx: commands.Context):
 		del self.voice_states[ctx.guild.id]
+
+	async def loop_song(self, ctx: commands.Context, Songs):
+		await ctx.voice_state.songs.put(song)
 
 	@commands.command(name=command[0][0], aliases=command[0][1:])
 	#@commands.has_permissions(manage_guild=True)
@@ -401,7 +400,10 @@ class Music(commands.Cog):
 	async def _skip(self, ctx: commands.Context):
 		if not ctx.voice_state.is_playing:
 			return await ctx.send(':mute: 현재 재생중인 음악이 없습니다.')
-
+		
+		await ctx.message.add_reaction('⏭')
+		ctx.voice_state.skip()
+		'''
 		voter = ctx.message.author
 		if voter == ctx.voice_state.current.requester:
 			await ctx.message.add_reaction('⏭')
@@ -419,6 +421,7 @@ class Music(commands.Cog):
 
 		else:
 			await ctx.send('```이미 투표하셨습니다.```')
+		'''
 
 	@commands.command(name=command[6][0], aliases=command[6][1:])
 	async def _queue(self, ctx: commands.Context, *, page: int = 1):
@@ -460,16 +463,19 @@ class Music(commands.Cog):
 		await result.add_reaction('✅')
 		
 
-	@commands.command(name='loopaassddaassdd')
+	@commands.command(name=command[13][0], aliases=command[13][1:])
 	async def _loop(self, ctx: commands.Context):
-		'''
 		if not ctx.voice_state.is_playing:
 			return await ctx.send(':mute: 현재 재생중인 음악이 없습니다.')
 
 		# Inverse boolean value to loop and unloop.
 		ctx.voice_state.loop = not ctx.voice_state.loop
-		await ctx.message.add_reaction('🔁')
-		'''
+		if ctx.voice_state.loop :
+			result = await ctx.send('반복재생이 설정되었습니다!')
+		else:
+			result = await ctx.send('반복재생이 취소되었습니다!')
+		await result.add_reaction('🔁')
+
 	@commands.command(name=command[2][0], aliases=command[2][1:])
 	async def _play(self, ctx: commands.Context, *, search: str):
 		if not ctx.voice_state.voice:
@@ -482,7 +488,6 @@ class Music(commands.Cog):
 				await ctx.send('에러가 발생했습니다 : {}'.format(str(e)))
 			else:
 				song = Song(source)
-
 				await ctx.voice_state.songs.put(song)
 				await ctx.send('재생목록 추가 : {}'.format(str(source)))
 
@@ -511,6 +516,7 @@ class Music(commands.Cog):
 		command_list += ','.join(command[9]) + '\n'     #!정지
 		command_list += ','.join(command[10]) + '\n'     #!삭제
 		command_list += ','.join(command[11]) + '\n'     #!섞기
+		command_list += ','.join(command[13]) + '\n'     #!반복재생
 		embed = discord.Embed(
 				title = "----- 명령어 -----",
 				description= '```' + command_list + '```',
